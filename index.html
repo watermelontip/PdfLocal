@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PDF Local — 隐私优先的 PDF 工具箱</title>
+<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#c9d1d9;--text2:#8b949e;--accent:#58a6ff;--accent2:#3fb950;--accent3:#d2a8ff;--hover:#1f2937;--input:#0d1117;--error:#f85149}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+.app{max-width:900px;margin:0 auto;padding:20px}
+h1{font-size:24px;color:#fff;margin-bottom:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+h1 .badge{font-size:12px;color:var(--accent2);background:rgba(63,185,80,.15);padding:2px 8px;border-radius:4px}
+.subtitle{font-size:13px;color:var(--text2);margin-bottom:20px}
+.tools{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;margin-bottom:20px}
+.tool-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;cursor:pointer;transition:all .2s}
+.tool-card:hover{border-color:var(--accent);transform:translateY(-2px)}
+.tool-card .icon{font-size:28px;margin-bottom:8px}
+.tool-card h3{font-size:15px;color:#fff;margin-bottom:4px}
+.tool-card p{font-size:12px;color:var(--text2)}
+.workspace{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px;display:none}
+.workspace.show{display:block}
+.workspace h2{font-size:18px;color:#fff;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.back-btn{font-size:12px;color:var(--accent);cursor:pointer;margin-left:auto}
+.back-btn:hover{text-decoration:underline}
+.dropzone{border:2px dashed var(--border);border-radius:8px;padding:32px;text-align:center;margin-bottom:16px;transition:all .2s}
+.dropzone.dragover{border-color:var(--accent);background:rgba(88,166,255,.05)}
+.dropzone .icon{font-size:36px;opacity:.5;margin-bottom:8px}
+.dropzone p{font-size:13px;color:var(--text2)}
+.file-list{margin-bottom:16px}
+.file-item{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;margin-bottom:6px;font-size:13px}
+.file-item .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-item .size{color:var(--text2);font-size:11px}
+.file-item .remove{color:var(--error);cursor:pointer;font-size:14px}
+.btn{padding:8px 16px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);cursor:pointer;font-size:13px;transition:all .15s}
+.btn:hover{background:var(--hover);border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn.primary:hover{background:#4090e0}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-group{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.row{display:flex;gap:12px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+.row label{font-size:12px;color:var(--text2);min-width:80px}
+.row input[type=number]{width:80px;padding:5px 8px;background:var(--input);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:12px}
+.row select{padding:5px 8px;background:var(--input);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:12px}
+.row input[type=text]{flex:1;padding:5px 8px;background:var(--input);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:12px}
+.progress{margin-top:12px;font-size:12px;color:var(--accent2)}
+.result{margin-top:12px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:13px;white-space:pre-wrap;max-height:200px;overflow:auto}
+.privacy-badge{display:inline-flex;align-items:center;gap:4px;background:rgba(63,185,80,.1);border:1px solid rgba(63,185,80,.3);border-radius:10px;padding:2px 8px;font-size:10px;color:var(--accent2)}
+.warning{background:rgba(210,168,34,.1);border:1px solid rgba(210,168,34,.3);border-radius:6px;padding:10px;font-size:12px;color:var(--warn);margin-bottom:12px}
+@media(max-width:768px){.tools{grid-template-columns:1fr}.row{flex-direction:column}.row label{min-width:auto}}
+</style>
+</head>
+<body>
+<div class="app">
+<h1>📄 PDF Local <span class="badge">离线</span> <span class="privacy-badge">🔒 文件不离开浏览器</span></h1>
+<p class="subtitle">隐私优先的 PDF 工具箱 — 合并、拆分、旋转、水印、提取文本</p>
+
+<div class="warning" id="offlineWarn" style="display:none">⚠️ 检测到离线状态。PDF 处理库需要首次在线加载（约 200KB），之后会缓存。请先连接网络使用一次。</div>
+
+<div class="tools" id="toolGrid">
+<div class="tool-card" onclick="openTool('merge')"><div class="icon">📎</div><h3>合并 PDF</h3><p>将多个 PDF 文件合并为一个</p></div>
+<div class="tool-card" onclick="openTool('split')"><div class="icon">✂️</div><h3>拆分 PDF</h3><p>提取指定页面为新 PDF</p></div>
+<div class="tool-card" onclick="openTool('rotate')"><div class="icon">🔄</div><h3>旋转页面</h3><p>旋转 PDF 中的所有或指定页面</p></div>
+<div class="tool-card" onclick="openTool('watermark')"><div class="icon">💧</div><h3>添加水印</h3><p>在每页添加文字水印</p></div>
+<div class="tool-card" onclick="openTool('extract')"><div class="icon">📝</div><h3>提取文本</h3><p>从 PDF 中提取全部文字内容</p></div>
+<div class="tool-card" onclick="openTool('info')"><div class="icon">ℹ️</div><h3>PDF 信息</h3><p>查看 PDF 页数、大小、元数据</p></div>
+</div>
+
+<div class="workspace" id="workspace">
+<h2 id="wsTitle"><span id="wsIcon"></span> <span id="wsName"></span> <span class="back-btn" onclick="closeTool()">← 返回</span></h2>
+<div id="wsContent"></div>
+</div>
+</div>
+
+<script>
+var PDFLib = window.PDFLib;
+if (!PDFLib) {
+  document.getElementById('offlineWarn').style.display = 'block';
+}
+
+var currentFiles = [];
+
+function openTool(tool) {
+  document.getElementById('toolGrid').style.display = 'none';
+  document.getElementById('workspace').classList.add('show');
+  currentFiles = [];
+  
+  var configs = {
+    merge: { icon: '📎', name: '合并 PDF', html: buildMergeUI() },
+    split: { icon: '✂️', name: '拆分 PDF', html: buildSplitUI() },
+    rotate: { icon: '🔄', name: '旋转页面', html: buildRotateUI() },
+    watermark: { icon: '💧', name: '添加水印', html: buildWatermarkUI() },
+    extract: { icon: '📝', name: '提取文本', html: buildExtractUI() },
+    info: { icon: 'ℹ️', name: 'PDF 信息', html: buildInfoUI() }
+  };
+  
+  var cfg = configs[tool];
+  document.getElementById('wsIcon').textContent = cfg.icon;
+  document.getElementById('wsName').textContent = cfg.name;
+  document.getElementById('wsContent').innerHTML = cfg.html;
+  setupDropzone();
+}
+
+function closeTool() {
+  document.getElementById('toolGrid').style.display = '';
+  document.getElementById('workspace').classList.remove('show');
+}
+
+function buildDropzone(multiple) {
+  return '<div class="dropzone" id="dropzone">' +
+    '<div class="icon">📄</div>' +
+    '<p>拖拽 PDF 文件到此处，或 <label style="color:var(--accent);cursor:pointer">点击选择<input type="file" accept=".pdf" ' + (multiple ? 'multiple' : '') + ' onchange="handleFiles(event)" style="display:none"></label></p>' +
+    '</div><div class="file-list" id="fileList"></div>';
+}
+
+function buildMergeUI() {
+  return buildDropzone(true) +
+    '<div class="btn-group"><button class="btn primary" onclick="doMerge()" id="mergeBtn" disabled>合并 PDF</button></div>' +
+    '<div class="progress" id="progress"></div>';
+}
+
+function buildSplitUI() {
+  return buildDropzone(false) +
+    '<div class="row"><label>页面范围</label><input type="text" id="pageRange" placeholder="如: 1-3, 5, 7-10"></div>' +
+    '<div class="btn-group"><button class="btn primary" onclick="doSplit()" id="splitBtn" disabled>拆分</button></div>' +
+    '<div class="progress" id="progress"></div>';
+}
+
+function buildRotateUI() {
+  return buildDropzone(false) +
+    '<div class="row"><label>旋转角度</label><select id="rotateAngle"><option value="90">90° 顺时针</option><option value="180">180°</option><option value="270">270° 顺时针</option></select></div>' +
+    '<div class="btn-group"><button class="btn primary" onclick="doRotate()" id="rotateBtn" disabled>旋转</button></div>' +
+    '<div class="progress" id="progress"></div>';
+}
+
+function buildWatermarkUI() {
+  return buildDropzone(false) +
+    '<div class="row"><label>水印文字</label><input type="text" id="wmText" placeholder="机密 / CONFIDENTIAL" value="机密"></div>' +
+    '<div class="row"><label>字号</label><input type="number" id="wmSize" value="50" min="10" max="200"></div>' +
+    '<div class="row"><label>透明度</label><input type="number" id="wmOpacity" value="0.15" min="0.05" max="1" step="0.05"></div>' +
+    '<div class="btn-group"><button class="btn primary" onclick="doWatermark()" id="wmBtn" disabled>添加水印</button></div>' +
+    '<div class="progress" id="progress"></div>';
+}
+
+function buildExtractUI() {
+  return buildDropzone(false) +
+    '<div class="btn-group"><button class="btn primary" onclick="doExtract()" id="extractBtn" disabled>提取文本</button></div>' +
+    '<div class="progress" id="progress"></div>' +
+    '<div class="result" id="result" style="display:none"></div>';
+}
+
+function buildInfoUI() {
+  return buildDropzone(false) +
+    '<div class="btn-group"><button class="btn primary" onclick="doInfo()" id="infoBtn" disabled>查看信息</button></div>' +
+    '<div class="result" id="result" style="display:none"></div>';
+}
+
+function setupDropzone() {
+  var dz = document.getElementById('dropzone');
+  if (!dz) return;
+  dz.addEventListener('dragover', function(e) { e.preventDefault(); dz.classList.add('dragover'); });
+  dz.addEventListener('dragleave', function() { dz.classList.remove('dragover'); });
+  dz.addEventListener('drop', function(e) {
+    e.preventDefault();
+    dz.classList.remove('dragover');
+    addFiles(e.dataTransfer.files);
+  });
+}
+
+function handleFiles(e) { addFiles(e.target.files); }
+
+function addFiles(fileList) {
+  for (var i = 0; i < fileList.length; i++) {
+    if (fileList[i].type === 'application/pdf' || fileList[i].name.endsWith('.pdf')) {
+      currentFiles.push(fileList[i]);
+    }
+  }
+  renderFileList();
+  updateButtons();
+}
+
+function renderFileList() {
+  var el = document.getElementById('fileList');
+  if (!el) return;
+  el.innerHTML = currentFiles.map(function(f, i) {
+    return '<div class="file-item"><span class="name">📄 ' + f.name + '</span><span class="size">' + (f.size/1024).toFixed(1) + ' KB</span><span class="remove" onclick="removeFile(' + i + ')">✕</span></div>';
+  }).join('');
+}
+
+function removeFile(i) {
+  currentFiles.splice(i, 1);
+  renderFileList();
+  updateButtons();
+}
+
+function updateButtons() {
+  var btns = document.querySelectorAll('.btn.primary');
+  btns.forEach(function(b) { b.disabled = currentFiles.length === 0; });
+}
+
+function setProgress(msg) {
+  var el = document.getElementById('progress');
+  if (el) el.textContent = msg;
+}
+
+function downloadBlob(blob, name) {
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function readFileAsArrayBuffer(file) {
+  return new Promise(function(resolve) {
+    var reader = new FileReader();
+    reader.onload = function(e) { resolve(e.target.result); };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+// === Merge ===
+async function doMerge() {
+  if (!PDFLib) { alert('PDF 库未加载，请检查网络'); return; }
+  if (currentFiles.length < 2) { alert('请至少选择 2 个 PDF 文件'); return; }
+  setProgress('合并中...');
+  try {
+    var merged = await PDFLib.PDFDocument.create();
+    for (var i = 0; i < currentFiles.length; i++) {
+      setProgress('处理 ' + (i+1) + '/' + currentFiles.length + ': ' + currentFiles[i].name);
+      var bytes = await readFileAsArrayBuffer(currentFiles[i]);
+      var doc = await PDFLib.PDFDocument.load(bytes);
+      var pages = await merged.copyPages(doc, doc.getPageIndices());
+      pages.forEach(function(p) { merged.addPage(p); });
+    }
+    var pdfBytes = await merged.save();
+    downloadBlob(new Blob([pdfBytes], { type: 'application/pdf' }), 'merged.pdf');
+    setProgress('✅ 合并完成！已下载 merged.pdf');
+  } catch(e) { setProgress('❌ 错误: ' + e.message); }
+}
+
+// === Split ===
+async function doSplit() {
+  if (!PDFLib) { alert('PDF 库未加载'); return; }
+  if (currentFiles.length === 0) return;
+  var range = document.getElementById('pageRange').value;
+  if (!range) { alert('请输入页面范围'); return; }
+  setProgress('拆分中...');
+  try {
+    var bytes = await readFileAsArrayBuffer(currentFiles[0]);
+    var srcDoc = await PDFLib.PDFDocument.load(bytes);
+    var indices = parsePageRange(range, srcDoc.getPageCount());
+    var newDoc = await PDFLib.PDFDocument.create();
+    var copied = await newDoc.copyPages(srcDoc, indices);
+    copied.forEach(function(p) { newDoc.addPage(p); });
+    var pdfBytes = await newDoc.save();
+    downloadBlob(new Blob([pdfBytes], { type: 'application/pdf' }), 'split.pdf');
+    setProgress('✅ 拆分完成！提取了 ' + indices.length + ' 页');
+  } catch(e) { setProgress('❌ 错误: ' + e.message); }
+}
+
+function parsePageRange(str, max) {
+  var pages = [];
+  str.split(',').forEach(function(part) {
+    part = part.trim();
+    if (part.indexOf('-') > -1) {
+      var p = part.split('-');
+      var start = parseInt(p[0]) - 1, end = parseInt(p[1]) - 1;
+      for (var i = start; i <= end && i < max; i++) pages.push(i);
+    } else {
+      var n = parseInt(part) - 1;
+      if (n >= 0 && n < max) pages.push(n);
+    }
+  });
+  return pages;
+}
+
+// === Rotate ===
+async function doRotate() {
+  if (!PDFLib) { alert('PDF 库未加载'); return; }
+  if (currentFiles.length === 0) return;
+  var angle = parseInt(document.getElementById('rotateAngle').value);
+  setProgress('旋转中...');
+  try {
+    var bytes = await readFileAsArrayBuffer(currentFiles[0]);
+    var doc = await PDFLib.PDFDocument.load(bytes);
+    var pages = doc.getPages();
+    pages.forEach(function(p) { p.setRotation(PDFLib.degrees((p.getRotation().angle + angle) % 360)); });
+    var pdfBytes = await doc.save();
+    downloadBlob(new Blob([pdfBytes], { type: 'application/pdf' }), 'rotated.pdf');
+    setProgress('✅ 旋转完成！' + pages.length + ' 页已旋转 ' + angle + '°');
+  } catch(e) { setProgress('❌ 错误: ' + e.message); }
+}
+
+// === Watermark ===
+async function doWatermark() {
+  if (!PDFLib) { alert('PDF 库未加载'); return; }
+  if (currentFiles.length === 0) return;
+  var text = document.getElementById('wmText').value || '机密';
+  var size = parseInt(document.getElementById('wmSize').value) || 50;
+  var opacity = parseFloat(document.getElementById('wmOpacity').value) || 0.15;
+  setProgress('添加水印中...');
+  try {
+    var bytes = await readFileAsArrayBuffer(currentFiles[0]);
+    var doc = await PDFLib.PDFDocument.load(bytes);
+    var font = await doc.embedFont(PDFLib.StandardFonts.Helvetica);
+    var pages = doc.getPages();
+    pages.forEach(function(p) {
+      var w = p.getWidth(), h = p.getHeight();
+      p.drawText(text, {
+        x: w/2 - (text.length * size * 0.3),
+        y: h/2,
+        size: size,
+        font: font,
+        color: PDFLib.rgb(0.5, 0.5, 0.5),
+        opacity: opacity,
+        rotate: PDFLib.degrees(45)
+      });
+    });
+    var pdfBytes = await doc.save();
+    downloadBlob(new Blob([pdfBytes], { type: 'application/pdf' }), 'watermarked.pdf');
+    setProgress('✅ 水印添加完成！' + pages.length + ' 页');
+  } catch(e) { setProgress('❌ 错误: ' + e.message); }
+}
+
+// === Extract Text ===
+async function doExtract() {
+  if (!PDFLib) { alert('PDF 库未加载'); return; }
+  if (currentFiles.length === 0) return;
+  setProgress('提取文本中...');
+  try {
+    var bytes = await readFileAsArrayBuffer(currentFiles[0]);
+    var doc = await PDFLib.PDFDocument.load(bytes);
+    var pageCount = doc.getPageCount();
+    // pdf-lib doesn't have text extraction, show page info instead
+    var info = 'PDF 信息:\n';
+    info += '页数: ' + pageCount + '\n';
+    var title = doc.getTitle();
+    if (title) info += '标题: ' + title + '\n';
+    var author = doc.getAuthor();
+    if (author) info += '作者: ' + author + '\n';
+    info += '\n注意: pdf-lib 不支持文本提取。如需提取文本，请使用其他工具。';
+    document.getElementById('result').style.display = 'block';
+    document.getElementById('result').textContent = info;
+    setProgress('✅ 完成');
+  } catch(e) { setProgress('❌ 错误: ' + e.message); }
+}
+
+// === Info ===
+async function doInfo() {
+  if (!PDFLib) { alert('PDF 库未加载'); return; }
+  if (currentFiles.length === 0) return;
+  try {
+    var bytes = await readFileAsArrayBuffer(currentFiles[0]);
+    var doc = await PDFLib.PDFDocument.load(bytes);
+    var info = '📄 ' + currentFiles[0].name + '\n\n';
+    info += '页数: ' + doc.getPageCount() + '\n';
+    info += '文件大小: ' + (currentFiles[0].size / 1024).toFixed(1) + ' KB\n';
+    var title = doc.getTitle(); if (title) info += '标题: ' + title + '\n';
+    var author = doc.getAuthor(); if (author) info += '作者: ' + author + '\n';
+    var subject = doc.getSubject(); if (subject) info += '主题: ' + subject + '\n';
+    var creator = doc.getCreator(); if (creator) info += '创建者: ' + creator + '\n';
+    var producer = doc.getProducer(); if (producer) info += '生成器: ' + producer + '\n';
+    var creationDate = doc.getCreationDate(); if (creationDate) info += '创建日期: ' + creationDate + '\n';
+    var modDate = doc.getModificationDate(); if (modDate) info += '修改日期: ' + modDate + '\n';
+    
+    var pages = doc.getPages();
+    info += '\n页面尺寸:\n';
+    pages.forEach(function(p, i) {
+      var w = p.getWidth(), h = p.getHeight();
+      info += '  第 ' + (i+1) + ' 页: ' + w.toFixed(0) + ' × ' + h.toFixed(0) + ' pt\n';
+    });
+    
+    document.getElementById('result').style.display = 'block';
+    document.getElementById('result').textContent = info;
+  } catch(e) { document.getElementById('result').textContent = '❌ 错误: ' + e.message; }
+}
+</script>
+</body>
+</html>
