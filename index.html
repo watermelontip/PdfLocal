@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PDF Local — 隐私优先的 PDF 工具箱</title>
 <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#c9d1d9;--text2:#8b949e;--accent:#58a6ff;--accent2:#3fb950;--accent3:#d2a8ff;--hover:#1f2937;--input:#0d1117;--error:#f85149}
@@ -305,18 +306,44 @@ async function doWatermark() {
   try {
     var bytes = await readFileAsArrayBuffer(currentFiles[0]);
     var doc = await PDFLib.PDFDocument.load(bytes);
-    var font = await doc.embedFont(PDFLib.StandardFonts.Helvetica);
+    // Use canvas to render watermark text as image (bypasses font encoding)
+    var canvas = document.createElement('canvas');
+    var ctx = canvas.getContext('2d');
+    var fontSize = size;
+    ctx.font = fontSize + 'px sans-serif';
+    var metrics = ctx.measureText(text);
+    var textWidth = metrics.width;
+    var textHeight = fontSize * 1.2;
+    // Canvas size to fit rotated text
+    var diag = Math.sqrt(textWidth * textWidth + textHeight * textHeight);
+    var canvasSize = Math.ceil(diag) + 20;
+    canvas.width = canvasSize;
+    canvas.height = canvasSize;
+    // Re-set font after canvas resize
+    ctx.font = fontSize + 'px sans-serif';
+    ctx.fillStyle = 'rgba(128, 128, 128, ' + opacity + ')';
+    ctx.translate(canvasSize / 2, canvasSize / 2);
+    ctx.rotate(-45 * Math.PI / 180);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 0, 0);
+    var pngDataUrl = canvas.toDataURL('image/png');
+    var pngBytes = Uint8Array.from(atob(pngDataUrl.split(',')[1]), function(c) { return c.charCodeAt(0); });
+    var watermarkImage = await doc.embedPng(pngBytes);
+    var imgDims = watermarkImage.scale(1);
     var pages = doc.getPages();
     pages.forEach(function(p) {
       var w = p.getWidth(), h = p.getHeight();
-      p.drawText(text, {
-        x: w/2 - (text.length * size * 0.3),
-        y: h/2,
-        size: size,
-        font: font,
-        color: PDFLib.rgb(0.5, 0.5, 0.5),
-        opacity: opacity,
-        rotate: PDFLib.degrees(45)
+      // Scale watermark image to fit page nicely
+      var scale = (size * 4) / canvasSize;
+      var imgW = canvasSize * scale;
+      var imgH = canvasSize * scale;
+      p.drawImage(watermarkImage, {
+        x: w / 2 - imgW / 2,
+        y: h / 2 - imgH / 2,
+        width: imgW,
+        height: imgH,
+        opacity: 1 // opacity already baked into the canvas rendering
       });
     });
     var pdfBytes = await doc.save();
@@ -332,19 +359,31 @@ async function doExtract() {
   setProgress('提取文本中...');
   try {
     var bytes = await readFileAsArrayBuffer(currentFiles[0]);
-    var doc = await PDFLib.PDFDocument.load(bytes);
-    var pageCount = doc.getPageCount();
-    // pdf-lib doesn't have text extraction, show page info instead
-    var info = 'PDF 信息:\n';
-    info += '页数: ' + pageCount + '\n';
-    var title = doc.getTitle();
-    if (title) info += '标题: ' + title + '\n';
-    var author = doc.getAuthor();
-    if (author) info += '作者: ' + author + '\n';
-    info += '\n注意: pdf-lib 不支持文本提取。如需提取文本，请使用其他工具。';
+    // Use pdf.js for actual text extraction
+    if (typeof pdfjsLib === 'undefined') {
+      setProgress('❌ pdf.js 库未加载，请检查网络连接');
+      return;
+    }
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    var loadingTask = pdfjsLib.getDocument({ data: bytes });
+    var pdfDoc = await loadingTask.promise;
+    var pageCount = pdfDoc.numPages;
+    var allText = '';
+    for (var i = 1; i <= pageCount; i++) {
+      setProgress('提取文本中... 第 ' + i + '/' + pageCount + ' 页');
+      var page = await pdfDoc.getPage(i);
+      var textContent = await page.getTextContent();
+      var pageText = textContent.items.map(function(item) { return item.str; }).join('');
+      if (pageText.trim()) {
+        allText += '--- 第 ' + i + ' 页 ---\n' + pageText + '\n\n';
+      }
+    }
+    if (!allText.trim()) {
+      allText = '（未提取到文本内容，该 PDF 可能是扫描件或纯图片）';
+    }
     document.getElementById('result').style.display = 'block';
-    document.getElementById('result').textContent = info;
-    setProgress('✅ 完成');
+    document.getElementById('result').textContent = allText.trim();
+    setProgress('✅ 文本提取完成！共 ' + pageCount + ' 页');
   } catch(e) { setProgress('❌ 错误: ' + e.message); }
 }
 
